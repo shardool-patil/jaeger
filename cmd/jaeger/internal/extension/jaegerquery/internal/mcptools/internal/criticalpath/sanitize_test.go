@@ -296,3 +296,42 @@ func TestSanitizeOverFlowingChildren_MultipleChildren(t *testing.T) {
 	_, ok4 := result[[8]byte{4}]
 	assert.False(t, ok4)
 }
+
+func TestSanitizeOverFlowingChildren_CascadingOrphans(t *testing.T) {
+	// Root (1): [100, 200]
+	// Child (2): [250, 300] -> Invalid (starts after root ends), must be removed
+	// Grandchild (3): [260, 290] -> Child of (2). Since (2) is removed, (3) MUST be removed too.
+	for i := 0; i < 100; i++ {
+		input := map[pcommon.SpanID]CPSpan{
+			[8]byte{1}: {
+				SpanID:       [8]byte{1},
+				StartTime:    100,
+				Duration:     100,
+				ChildSpanIDs: []pcommon.SpanID{[8]byte{2}},
+			},
+			[8]byte{2}: {
+				SpanID:       [8]byte{2},
+				ParentSpanID: [8]byte{1},
+				StartTime:    250,
+				Duration:     50,
+				ChildSpanIDs: []pcommon.SpanID{[8]byte{3}},
+			},
+			[8]byte{3}: {
+				SpanID:       [8]byte{3},
+				ParentSpanID: [8]byte{2},
+				StartTime:    260,
+				Duration:     30,
+			},
+		}
+
+		result := removeOverflowingChildren(input)
+
+		_, childExists := result[[8]byte{2}]
+		assert.False(t, childExists, "iter %d: child span 2 should be removed", i)
+
+		_, grandchildExists := result[[8]byte{3}]
+		assert.False(t, grandchildExists, "iter %d: grandchild span 3 should be removed because its parent was removed", i)
+
+		assert.Len(t, result, 1, "iter %d: only root span should remain in result", i)
+	}
+}
